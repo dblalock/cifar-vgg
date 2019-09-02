@@ -12,8 +12,12 @@ from keras.layers.core import Lambda
 from keras import backend as K
 from keras import regularizers
 
+
+MODEL_SAVE_PATH = 'cifar10vgg_model.h5'
+
+
 class cifar10vgg:
-    def __init__(self,train=True):
+    def __init__(self, train=False, saveas=None):
         self.num_classes = 10
         self.weight_decay = 0.0005
         self.x_shape = [32,32,3]
@@ -23,6 +27,10 @@ class cifar10vgg:
             self.model = self.train(self.model)
         else:
             self.model.load_weights('cifar10vgg.h5')
+
+        if saveas:
+            self.model.save(saveas)
+
 
 
     def build_model(self):
@@ -151,10 +159,10 @@ class cifar10vgg:
         lr_decay = 1e-6
         lr_drop = 20
         # The data, shuffled and split between train and test sets:
-        (x_train, y_train), (x_test, y_test) = cifar10.load_data()
-        x_train = x_train.astype('float32')
-        x_test = x_test.astype('float32')
-        x_train, x_test = self.normalize(x_train, x_test)
+        (X_train, y_train), (X_test, y_test) = cifar10.load_data()
+        X_train = X_train.astype('float32')
+        X_test = X_test.astype('float32')
+        X_train, X_test = self.normalize(X_train, X_test)
 
         y_train = keras.utils.to_categorical(y_train, self.num_classes)
         y_test = keras.utils.to_categorical(y_test, self.num_classes)
@@ -176,7 +184,7 @@ class cifar10vgg:
             horizontal_flip=True,  # randomly flip images
             vertical_flip=False)  # randomly flip images
         # (std, mean, and principal components if ZCA whitening is applied).
-        datagen.fit(x_train)
+        datagen.fit(X_train)
 
 
 
@@ -187,31 +195,72 @@ class cifar10vgg:
 
         # training process in a for loop with learning rate drop every 25 epoches.
 
-        historytemp = model.fit_generator(datagen.flow(x_train, y_train,
+        historytemp = model.fit_generator(datagen.flow(X_train, y_train,
                                          batch_size=batch_size),
-                            steps_per_epoch=x_train.shape[0] // batch_size,
+                            steps_per_epoch=X_train.shape[0] // batch_size,
                             epochs=maxepoches,
-                            validation_data=(x_test, y_test),callbacks=[reduce_lr],verbose=2)
+                            validation_data=(X_test, y_test),callbacks=[reduce_lr],verbose=2)
         model.save_weights('cifar10vgg.h5')
         return model
+
 
 if __name__ == '__main__':
 
 
-    (x_train, y_train), (x_test, y_test) = cifar10.load_data()
-    x_train = x_train.astype('float32')
-    x_test = x_test.astype('float32')
+    (X_train, y_train), (X_test, y_test) = cifar10.load_data()
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
 
     y_train = keras.utils.to_categorical(y_train, 10)
-    y_test = keras.utils.to_categorical(y_test, 10)
+    Y_test = keras.utils.to_categorical(y_test, 10)
 
-    model = cifar10vgg()
+    y_argmaxes = np.argmax(Y_test, 1)
+    # print("np.bincount(y_test)", np.bincount(y_test.ravel()))
+    # print("min, max y_test = ", np.min(y_test), np.max(y_test))
+    # print("Y_test shape = ", Y_test.shape)
+    # print("y_argmaxes shape = ", y_argmaxes.shape)
+    # print("starts:")
+    # print(y_test[:10])
+    # print(Y_test[:10])
+    # print(y_argmaxes[:10])
+    assert np.allclose(y_argmaxes, y_test.ravel())
+    # import sys; sys.exit()
 
-    predicted_x = model.predict(x_test)
-    residuals = np.argmax(predicted_x,1)!=np.argmax(y_test,1)
+    # model = cifar10vgg()
+    # model = cifar10vgg(saveas=MODEL_SAVE_PATH)
+    model = keras.models.load_model(MODEL_SAVE_PATH)
+    # model.load_weights()
+    # model.compile(optimizer='SGD')
 
-    loss = sum(residuals)/len(residuals)
-    print("the validation 0/1 loss is: ",loss)
+    # TODO think this is going wrong because model in the first case
+    # is instance of this custom class, whereas in this second case, it's
+    # just a regular Keras model
 
+    def normalize(X):
+        mean = 120.707
+        std = 64.15
+        return (X - mean) / (std + 1e-7)
+
+    X_test = normalize(X_test)  # no better than chance without this line
+
+    limit_n = 1000
+    y_probs_hat = model.predict(X_test[:limit_n])
+    y_hat = np.argmax(y_probs_hat, 1)
+    # wrong = y_hat != y_test.ravel()[:limit_n]
+    correct = y_hat == y_test.ravel()[:limit_n]
+
+    # wrong = np.argmax(predicted_x, 1) != y_test
+    # correct = np.argmax(predicted_x, 1) == y_test
+    # predicted_x = model.predict(X_test[:100])
+    # correct = np.argmax(predicted_x, 1) == y_test[:100]
+
+    acc = np.mean(correct)
+    # err_rate = np.mean(wrong)
+    print("the test accuracy is: ", acc)
+    # print("the test error rate is: ", err_rate)
+    assert acc > .91  # sanity check to make sure it worked
+
+    # now pull out the activations for X_train and X_test, as well as the
+    # weights in the final softmax layer
 
 

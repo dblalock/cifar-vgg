@@ -13,7 +13,7 @@ from keras import backend as K
 from keras import regularizers
 
 class cifar100vgg:
-    def __init__(self,train=True):
+    def __init__(self, train=False):
         self.num_classes = 100
         self.weight_decay = 0.0005
         self.x_shape = [32,32,3]
