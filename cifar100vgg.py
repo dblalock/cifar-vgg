@@ -8,15 +8,24 @@ from keras.layers import Dense, Dropout, Activation, Flatten
 from keras.layers import Conv2D, MaxPooling2D, BatchNormalization
 from keras import optimizers
 import numpy as np
-from keras.layers.core import Lambda
 from keras import backend as K
 from keras import regularizers
 
+
+MODEL_SAVE_PATH = 'cifar100vgg_model.h5'
+SOFTMAX_INPUTS_TRAIN_PATH = 'cifar100_softmax_inputs_train.npy'
+SOFTMAX_OUTPUTS_TRAIN_PATH = 'cifar100_softmax_outputs_train.npy'
+SOFTMAX_INPUTS_TEST_PATH = 'cifar100_softmax_inputs_test.npy'
+SOFTMAX_OUTPUTS_TEST_PATH = 'cifar100_softmax_outputs_test.npy'
+SOFTMAX_W_PATH = 'cifar100_softmax_W.npy'
+SOFTMAX_B_PATH = 'cifar100_softmax_b.npy'
+
+
 class cifar100vgg:
-    def __init__(self, train=False):
+    def __init__(self, train=False, saveas=None):
         self.num_classes = 100
         self.weight_decay = 0.0005
-        self.x_shape = [32,32,3]
+        self.x_shape = [32, 32, 3]
 
         self.model = self.build_model()
         if train:
@@ -24,6 +33,8 @@ class cifar100vgg:
         else:
             self.model.load_weights('cifar100vgg.h5')
 
+        if saveas:
+            self.model.save(saveas)
 
     def build_model(self):
         # Build the network of vgg for 10 classes with massive dropout and weight decay as described in the paper.
@@ -200,21 +211,205 @@ class cifar100vgg:
         model.save_weights('cifar100vgg.h5')
         return model
 
+
+def main():
+    save_model = False
+    check_model = False
+    save_softmax_params = True
+    save_test_activations = True
+    save_train_activations = True
+    check_test_activations = True
+    check_train_activations = True
+
+    (X_train, y_train), (X_test, y_test) = cifar100.load_data()
+    X_train = X_train.astype('float32')
+    # _, (X_test, y_test) = cifar10.load_data()
+    X_test = X_test.astype('float32')
+
+    # y_train = keras.utils.to_categorical(y_train, 10)
+    # Y_test = keras.utils.to_categorical(y_test, 10)
+
+    # y_argmaxes = np.argmax(Y_test, 1)
+    # print("np.bincount(y_test)", np.bincount(y_test.ravel()))
+    # print("min, max y_test = ", np.min(y_test), np.max(y_test))
+    # print("Y_test shape = ", Y_test.shape)
+    # print("y_argmaxes shape = ", y_argmaxes.shape)
+    # print("starts:")
+    # print(y_test[:10])
+    # print(Y_test[:10])
+    # print(y_argmaxes[:10])
+    # assert np.allclose(y_argmaxes, y_test.ravel())
+    # import sys; sys.exit()
+
+    if save_model:
+        print("Saving model...")
+        model = cifar100vgg(saveas=MODEL_SAVE_PATH)
+    model = keras.models.load_model(MODEL_SAVE_PATH)
+
+    if check_model:
+        print("checking model accuracy on test set...")
+
+        def normalize(X):
+            mean = 121.936
+            std = 68.389
+            return (X - mean) / (std + 1e-7)
+
+        X_test = normalize(X_test)  # no better than chance without this line
+
+        limit_n = 1000
+        y_probs_hat = model.predict(X_test[:limit_n])
+        y_hat = np.argmax(y_probs_hat, 1)
+        # wrong = y_hat != y_test.ravel()[:limit_n]
+        correct = y_hat == y_test.ravel()[:limit_n]
+
+        # wrong = np.argmax(predicted_x, 1) != y_test
+        # correct = np.argmax(predicted_x, 1) == y_test
+        # predicted_x = model.predict(X_test[:100])
+        # correct = np.argmax(predicted_x, 1) == y_test[:100]
+
+        acc = np.mean(correct)
+        # err_rate = np.mean(wrong)
+        print("the test accuracy is: ", acc)
+        # print("the test error rate is: ", err_rate)
+        assert acc > .65  # sanity check to make sure it worked
+
+    # now pull out the activations for X_train and X_test, as well as the
+    # weights in the final softmax layer
+    # model.summary()
+    # print("layers:")
+    # print([layer.name for layer in model.layers])
+    softmax = model.get_layer('dense_2')
+    inp_tensor = softmax.input
+    out_tensor = softmax.output
+    model_in = model.input
+    W, b = softmax.get_weights()
+    print("W, b shapes: ", W.shape, b.shape)
+    print("inp, outp tensors: ", inp_tensor, out_tensor)
+    # print("softmax layer: ", softmax)
+    # weights = softmax.
+
+    if save_softmax_params:
+        print("Saving softmax parameters...")
+        np.save(SOFTMAX_W_PATH, W, allow_pickle=False)
+        np.save(SOFTMAX_B_PATH, b, allow_pickle=False)
+
+    if save_train_activations or save_test_activations:
+        N_train = len(X_train)
+        N_test = len(X_test)
+        nbatches_train = 100
+        nbatches_test = 10
+        batch_sz_train = N_train // nbatches_train
+        batch_sz_test = N_test // nbatches_test
+        assert nbatches_train * batch_sz_train == N_train
+        assert nbatches_test * batch_sz_test == N_test
+
+        input_sz = K.int_shape(inp_tensor)[-1]
+        output_sz = K.int_shape(out_tensor)[-1]
+        sess = K.get_session()
+
+    # ------------------------------------------------ test activations
+    if save_test_activations:
+        print("Saving test activations (softmax input and output)...")
+        inputs_test = np.empty((N_test, input_sz), dtype=np.float32)
+        outputs_test = np.empty((N_test, output_sz), dtype=np.float32)
+        for b in range(nbatches_test):
+            print("running on batch {}/{}...".format(b + 1, nbatches_test))
+            start_idx = b * batch_sz_test
+            end_idx = start_idx + batch_sz_test
+            X = X_test[start_idx:end_idx]
+            inp, outp = sess.run([inp_tensor, out_tensor],
+                                 feed_dict={model_in: X})
+            inputs_test[start_idx:end_idx] = inp
+            outputs_test[start_idx:end_idx] = outp
+
+        print("inputs_test min: ", np.min(inputs_test))
+        print("inputs_test max: ", np.max(inputs_test))
+        print("outputs_test min", np.min(outputs_test))
+        print("outputs_test max", np.max(outputs_test))
+        np.save(SOFTMAX_INPUTS_TEST_PATH, inputs_test, allow_pickle=False)
+        np.save(SOFTMAX_OUTPUTS_TEST_PATH,
+                outputs_test, allow_pickle=False)
+
+    # ------------------------------------------------ training activations
+    if save_train_activations:
+        print("Saving train activations (softmax input and output)...")
+        inputs_train = np.empty((N_train, input_sz), dtype=np.float32)
+        outputs_train = np.empty((N_train, output_sz), dtype=np.float32)
+        for b in range(nbatches_train):
+            print("running on batch {}/{}...".format(b + 1, nbatches_train))
+            start_idx = b * batch_sz_train
+            end_idx = start_idx + batch_sz_train
+            X = X_train[start_idx:end_idx]
+            inp, outp = sess.run([inp_tensor, out_tensor],
+                                 feed_dict={model_in: X})
+            inputs_train[start_idx:end_idx] = inp
+            outputs_train[start_idx:end_idx] = outp
+
+        print("inputs_train min: ", np.min(inputs_train))
+        print("inputs_train max: ", np.max(inputs_train))
+        print("outputs_train min", np.min(outputs_train))
+        print("outputs_train max", np.max(outputs_train))
+        np.save(SOFTMAX_INPUTS_TRAIN_PATH, inputs_train,
+                allow_pickle=False)
+        np.save(SOFTMAX_OUTPUTS_TRAIN_PATH, outputs_train,
+                allow_pickle=False)
+
+    # ------------------------------------------------ check train activations
+    if check_test_activations:
+        X = np.load(SOFTMAX_INPUTS_TEST_PATH)
+        Y = np.load(SOFTMAX_OUTPUTS_TEST_PATH)
+        W = np.load(SOFTMAX_W_PATH)
+        b = np.load(SOFTMAX_B_PATH)
+
+        print("---- softmax for test data")
+        print("X shape: ", X.shape)
+        print("Y shape: ", Y.shape)
+        print("W shape: ", W.shape)
+        print("b shape: ", b.shape)
+
+        Y_hat = (X @ W) + b
+        diffs = Y - Y_hat
+        mse = np.mean(diffs * diffs) / np.var(Y)
+        print("mse: ", mse)
+        assert mse < 1e-7
+
+    # ------------------------------------------------ check train activations
+    if check_train_activations:
+        X = np.load(SOFTMAX_INPUTS_TRAIN_PATH)
+        Y = np.load(SOFTMAX_OUTPUTS_TRAIN_PATH)
+        W = np.load(SOFTMAX_W_PATH)
+        b = np.load(SOFTMAX_B_PATH)
+
+        print("---- softmax for train data")
+        print("X shape: ", X.shape)
+        print("Y shape: ", Y.shape)
+        print("W shape: ", W.shape)
+        print("b shape: ", b.shape)
+
+        Y_hat = (X @ W) + b
+        diffs = Y - Y_hat
+        mse = np.mean(diffs * diffs) / np.var(Y)
+        print("mse: ", mse)
+        assert mse < 1e-7
+
+
 if __name__ == '__main__':
-    (x_train, y_train), (x_test, y_test) = cifar100.load_data()
-    x_train = x_train.astype('float32')
-    x_test = x_test.astype('float32')
+    main()
 
-    y_train = keras.utils.to_categorical(y_train, 100)
-    y_test = keras.utils.to_categorical(y_test, 100)
+# if __name__ == '__main__':
+#     (x_train, y_train), (x_test, y_test) = cifar100.load_data()
+#     x_train = x_train.astype('float32')
+#     x_test = x_test.astype('float32')
 
-    model = cifar100vgg()
+#     y_train = keras.utils.to_categorical(y_train, 100)
+#     y_test = keras.utils.to_categorical(y_test, 100)
 
-    predicted_x = model.predict(x_test)
-    residuals = (np.argmax(predicted_x,1)!=np.argmax(y_test,1))
-    loss = sum(residuals)/len(residuals)
-    print("the validation 0/1 loss is: ",loss)
+#     model = cifar100vgg()
 
+#     predicted_x = model.predict(x_test)
+#     residuals = (np.argmax(predicted_x,1)!=np.argmax(y_test,1))
+#     loss = sum(residuals)/len(residuals)
+#     print("the validation 0/1 loss is: ",loss)
 
 
 
