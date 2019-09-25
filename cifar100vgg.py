@@ -124,7 +124,7 @@ class cifar100vgg:
         model.add(BatchNormalization())
 
         model.add(Dropout(0.5))
-        model.add(Dense(self.num_classes))
+        model.add(Dense(self.num_classes, name='dense_softmax'))
         model.add(Activation('softmax'))
         return model
 
@@ -215,9 +215,9 @@ class cifar100vgg:
 
 
 def main():
-    save_labels = False
-    save_model = False
-    check_model = False
+    save_labels = True
+    save_model = True
+    check_model = True
     save_softmax_params = True
     save_test_activations = True
     save_train_activations = True
@@ -225,76 +225,47 @@ def main():
     check_train_activations = True
 
     (X_train, y_train), (X_test, y_test) = cifar100.load_data()
-    X_train = X_train.astype('float32')
-    # _, (X_test, y_test) = cifar10.load_data()
-    X_test = X_test.astype('float32')
+    X_train = X_train.astype(np.float32)
+    X_test = X_test.astype(np.float32)
 
     if save_labels:
         print("Saving train and test labels...")
         np.save(LABELS_TRAIN_PATH, y_train, allow_pickle=False)
         np.save(LABELS_TEST_PATH, y_test, allow_pickle=False)
 
-    # y_train = keras.utils.to_categorical(y_train, 10)
-    # Y_test = keras.utils.to_categorical(y_test, 10)
-
-    # y_argmaxes = np.argmax(Y_test, 1)
-    # print("np.bincount(y_test)", np.bincount(y_test.ravel()))
-    # print("min, max y_test = ", np.min(y_test), np.max(y_test))
-    # print("Y_test shape = ", Y_test.shape)
-    # print("y_argmaxes shape = ", y_argmaxes.shape)
-    # print("starts:")
-    # print(y_test[:10])
-    # print(Y_test[:10])
-    # print(y_argmaxes[:10])
-    # assert np.allclose(y_argmaxes, y_test.ravel())
-    # import sys; sys.exit()
-
     if save_model:
         print("Saving model...")
         model = cifar100vgg(saveas=MODEL_SAVE_PATH)
     model = keras.models.load_model(MODEL_SAVE_PATH)
 
+    def normalize(X):
+        mean = 121.936
+        std = 68.389
+        return (X - mean) / (std + 1e-7)
+
+    X_train = normalize(X_train)  # no better than chance without this line
+    X_test = normalize(X_test)  # no better than chance without this line
+
     if check_model:
-        print("checking model accuracy on test set...")
-
-        def normalize(X):
-            mean = 121.936
-            std = 68.389
-            return (X - mean) / (std + 1e-7)
-
-        X_test = normalize(X_test)  # no better than chance without this line
-
         limit_n = 1000
         y_probs_hat = model.predict(X_test[:limit_n])
         y_hat = np.argmax(y_probs_hat, 1)
         # wrong = y_hat != y_test.ravel()[:limit_n]
         correct = y_hat == y_test.ravel()[:limit_n]
 
-        # wrong = np.argmax(predicted_x, 1) != y_test
-        # correct = np.argmax(predicted_x, 1) == y_test
-        # predicted_x = model.predict(X_test[:100])
-        # correct = np.argmax(predicted_x, 1) == y_test[:100]
-
         acc = np.mean(correct)
-        # err_rate = np.mean(wrong)
         print("the test accuracy is: ", acc)
-        # print("the test error rate is: ", err_rate)
         assert acc > .65  # sanity check to make sure it worked
 
     # now pull out the activations for X_train and X_test, as well as the
     # weights in the final softmax layer
-    # model.summary()
-    # print("layers:")
-    # print([layer.name for layer in model.layers])
-    softmax = model.get_layer('dense_2')
+    softmax = model.get_layer('dense_softmax')
     inp_tensor = softmax.input
     out_tensor = softmax.output
     model_in = model.input
     W, b = softmax.get_weights()
     print("W, b shapes: ", W.shape, b.shape)
     print("inp, outp tensors: ", inp_tensor, out_tensor)
-    # print("softmax layer: ", softmax)
-    # weights = softmax.
 
     if save_softmax_params:
         print("Saving softmax parameters...")
@@ -320,15 +291,21 @@ def main():
         print("Saving test activations (softmax input and output)...")
         inputs_test = np.empty((N_test, input_sz), dtype=np.float32)
         outputs_test = np.empty((N_test, output_sz), dtype=np.float32)
-        for b in range(nbatches_test):
-            print("running on batch {}/{}...".format(b + 1, nbatches_test))
-            start_idx = b * batch_sz_test
+        for i in range(nbatches_test):
+            print("running on batch {}/{}...".format(i + 1, nbatches_test))
+            start_idx = i * batch_sz_test
             end_idx = start_idx + batch_sz_test
             X = X_test[start_idx:end_idx]
             inp, outp = sess.run([inp_tensor, out_tensor],
                                  feed_dict={model_in: X})
             inputs_test[start_idx:end_idx] = inp
             outputs_test[start_idx:end_idx] = outp
+
+            # sanity check accuracy for this batch
+            lbls = y_test[start_idx:end_idx].ravel()
+            logits = outp
+            lbls_hat = np.argmax(logits, axis=1)
+            print("acc: ", np.mean(lbls == lbls_hat))
 
         print("inputs_test min: ", np.min(inputs_test))
         print("inputs_test max: ", np.max(inputs_test))
@@ -343,9 +320,9 @@ def main():
         print("Saving train activations (softmax input and output)...")
         inputs_train = np.empty((N_train, input_sz), dtype=np.float32)
         outputs_train = np.empty((N_train, output_sz), dtype=np.float32)
-        for b in range(nbatches_train):
-            print("running on batch {}/{}...".format(b + 1, nbatches_train))
-            start_idx = b * batch_sz_train
+        for i in range(nbatches_train):
+            print("running on batch {}/{}...".format(i + 1, nbatches_train))
+            start_idx = i * batch_sz_train
             end_idx = start_idx + batch_sz_train
             X = X_train[start_idx:end_idx]
             inp, outp = sess.run([inp_tensor, out_tensor],
@@ -353,12 +330,17 @@ def main():
             inputs_train[start_idx:end_idx] = inp
             outputs_train[start_idx:end_idx] = outp
 
+            # sanity check accuracy for this batch
+            lbls = y_train[start_idx:end_idx].ravel()
+            logits = outp
+            lbls_hat = np.argmax(logits, axis=1)
+            print("acc: ", np.mean(lbls == lbls_hat))
+
         print("inputs_train min: ", np.min(inputs_train))
         print("inputs_train max: ", np.max(inputs_train))
         print("outputs_train min", np.min(outputs_train))
         print("outputs_train max", np.max(outputs_train))
-        np.save(SOFTMAX_INPUTS_TRAIN_PATH, inputs_train,
-                allow_pickle=False)
+        np.save(SOFTMAX_INPUTS_TRAIN_PATH, inputs_train, allow_pickle=False)
         np.save(SOFTMAX_OUTPUTS_TRAIN_PATH, outputs_train,
                 allow_pickle=False)
 
@@ -381,6 +363,12 @@ def main():
         print("mse: ", mse)
         assert mse < 1e-7
 
+        y = np.load(LABELS_TEST_PATH).ravel()
+        logits_hat = Y_hat
+        y_hat = np.argmax(logits_hat, axis=1).ravel()
+        print("acc: ", np.mean(y == y_hat))
+        print("class counts: ", np.bincount(y))
+
     # ------------------------------------------------ check train activations
     if check_train_activations:
         X = np.load(SOFTMAX_INPUTS_TRAIN_PATH)
@@ -400,25 +388,12 @@ def main():
         print("mse: ", mse)
         assert mse < 1e-7
 
+        y = np.load(LABELS_TRAIN_PATH).ravel()
+        logits_hat = Y_hat
+        y_hat = np.argmax(logits_hat, axis=1).ravel()
+        print("acc: ", np.mean(y == y_hat))
+        print("class counts: ", np.bincount(y))
+
 
 if __name__ == '__main__':
     main()
-
-# if __name__ == '__main__':
-#     (x_train, y_train), (x_test, y_test) = cifar100.load_data()
-#     x_train = x_train.astype('float32')
-#     x_test = x_test.astype('float32')
-
-#     y_train = keras.utils.to_categorical(y_train, 100)
-#     y_test = keras.utils.to_categorical(y_test, 100)
-
-#     model = cifar100vgg()
-
-#     predicted_x = model.predict(x_test)
-#     residuals = (np.argmax(predicted_x,1)!=np.argmax(y_test,1))
-#     loss = sum(residuals)/len(residuals)
-#     print("the validation 0/1 loss is: ",loss)
-
-
-
-
