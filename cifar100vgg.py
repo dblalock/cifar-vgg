@@ -12,6 +12,8 @@ from keras import backend as K
 from keras import regularizers
 
 
+LABELS_TRAIN_PATH = 'cifar100_labels_train.npy'
+LABELS_TEST_PATH = 'cifar100_labels_test.npy'
 MODEL_SAVE_PATH = 'cifar100vgg_model.h5'
 SOFTMAX_INPUTS_TRAIN_PATH = 'cifar100_softmax_inputs_train.npy'
 SOFTMAX_OUTPUTS_TRAIN_PATH = 'cifar100_softmax_outputs_train.npy'
@@ -213,6 +215,7 @@ class cifar100vgg:
 
 
 def main():
+    save_labels = False
     save_model = False
     check_model = False
     save_softmax_params = True
@@ -225,6 +228,11 @@ def main():
     X_train = X_train.astype('float32')
     # _, (X_test, y_test) = cifar10.load_data()
     X_test = X_test.astype('float32')
+
+    if save_labels:
+        print("Saving train and test labels...")
+        np.save(LABELS_TRAIN_PATH, y_train, allow_pickle=False)
+        np.save(LABELS_TEST_PATH, y_test, allow_pickle=False)
 
     # y_train = keras.utils.to_categorical(y_train, 10)
     # Y_test = keras.utils.to_categorical(y_test, 10)

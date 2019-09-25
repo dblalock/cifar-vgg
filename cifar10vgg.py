@@ -12,6 +12,8 @@ from keras import backend as K
 from keras import regularizers
 
 
+LABELS_TRAIN_PATH = 'cifar10_labels_train.npy'
+LABELS_TEST_PATH = 'cifar10_labels_test.npy'
 MODEL_SAVE_PATH = 'cifar10vgg_model.h5'
 SOFTMAX_INPUTS_TRAIN_PATH = 'cifar10_softmax_inputs_train.npy'
 SOFTMAX_OUTPUTS_TRAIN_PATH = 'cifar10_softmax_outputs_train.npy'
@@ -208,6 +210,7 @@ class cifar10vgg:
 
 
 def main():
+    save_labels = False
     save_model = False
     check_model = False
     save_softmax_params = True
@@ -235,6 +238,11 @@ def main():
     # print(y_argmaxes[:10])
     # assert np.allclose(y_argmaxes, y_test.ravel())
     # import sys; sys.exit()
+
+    if save_labels:
+        print("Saving train and test labels...")
+        np.save(LABELS_TRAIN_PATH, y_train, allow_pickle=False)
+        np.save(LABELS_TEST_PATH, y_test, allow_pickle=False)
 
     if save_model:
         print("Saving model...")
